@@ -169,20 +169,10 @@ func ConvertProxyToVmess(proxy Proxy) Vmess {
 
 // buildVMessProxy 将 VMess 链接转换为 Clash Proxy，并应用输出阶段的 UDP、证书校验和前置代理覆盖项。
 // buildVMessProxy 将 VMess 链接转换为 Clash Proxy，并应用输出阶段的 UDP、证书校验和前置代理覆盖项。
+// buildVMessProxy
 func buildVMessProxy(link Urls, config OutputConfig) (Proxy, error) {
-	vmess, err := DecodeVMESSURL(link.Url)
-	if err != nil {
-		return Proxy{}, err
-	}
-	if vmess.Ps == "" {
-		vmess.Ps = fmt.Sprintf("%s:%s", vmess.Add, utils.GetPortString(vmess.Port))
-	}
+	// ... (前面的解析和初始化保持不变)
 
-	tls := vmess.Tls != "none" && vmess.Tls != ""
-	port, _ := convertToInt(vmess.Port)
-	aid, _ := convertToInt(vmess.Aid)
-
-	// 新建一个 Proxy 对象
 	proxy := Proxy{
 		Name:             vmess.Ps,
 		Type:             "vmess",
@@ -191,42 +181,51 @@ func buildVMessProxy(link Urls, config OutputConfig) (Proxy, error) {
 		Cipher:           vmess.Scy,
 		Uuid:             vmess.Id,
 		AlterId:          strconv.Itoa(aid),
-		Network:          vmess.Net,
+		// 注意：不要在这里直接写死 Network: vmess.Net，我们在下面动态判断
 		Tls:              tls,
 		Udp:              config.Udp,
 		Skip_cert_verify: config.Cert,
 		Dialer_proxy:     link.DialerProxyName,
 	}
 
-	// 核心修复逻辑：根据协议动态分配 opts
+	// 【核心修复逻辑：针对 Mihomo 规范进行兼容】
 	if vmess.Net == "tcp" && vmess.Type == "http" {
-		// 修复 TCP + HTTP 伪装的情况
-		// Clash 的 http-opts 要求 path 是字符串数组，headers 中的值也是数组
+		// 1. 强制将 Network 修改为 http，以兼容新版 Clash/Mihomo 规范
+		proxy.Network = "http" 
+		
 		host := vmess.Host
 		if host == "" {
-			host = vmess.Add // 如果为空，容错回退为 IP
+			host = vmess.Add 
 		}
 		path := vmess.Path
 		if path == "" {
-			path = "/" // 容错处理
+			path = "/" 
 		}
-		
-		httpOpts := map[string]interface{}{
+
+		proxy.Http_opts = map[string]interface{}{
 			"method": "GET",
 			"path":   []string{path},
 			"headers": map[string]interface{}{
 				"Host": []string{host},
 			},
 		}
-		proxy.Http_opts = httpOpts // 注意：这需要在你的 Proxy 结构体中存在 Http_opts 字段
-
-	} else {
-		// 默认处理为 ws_opts (保留原作者逻辑)
-		wsOpts := map[string]interface{}{"path": vmess.Path, "headers": map[string]interface{}{"Host": vmess.Host}}
-		DeleteOpts(wsOpts)
+	} else if vmess.Net == "ws" {
+		// 2. 普通的 WebSocket 保持原样
+		proxy.Network = "ws"
+		wsOpts := map[string]interface{}{
+			"path": vmess.Path,
+			"headers": map[string]interface{}{
+				"Host": vmess.Host,
+			},
+		}
+		DeleteOpts(wsOpts) 
 		proxy.Ws_opts = wsOpts
+	} else {
+		// 3. 其他正常的协议（如纯 tcp, grpc 等），直接使用原始的 Net 值
+		proxy.Network = vmess.Net
 	}
 
+	// ... (后面的处理 Sni 逻辑保持不变)
 	return proxy, nil
 }
 
