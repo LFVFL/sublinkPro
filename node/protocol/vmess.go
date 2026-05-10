@@ -170,8 +170,20 @@ func ConvertProxyToVmess(proxy Proxy) Vmess {
 // buildVMessProxy 将 VMess 链接转换为 Clash Proxy，并应用输出阶段的 UDP、证书校验和前置代理覆盖项。
 // buildVMessProxy 将 VMess 链接转换为 Clash Proxy，并应用输出阶段的 UDP、证书校验和前置代理覆盖项。
 // buildVMessProxy
+// buildVMessProxy 经过修正的转换函数：正确区分 HTTP 伪装和 WebSocket
+// buildVMessProxy 经过修正的转换函数：正确区分 HTTP 伪装和 WebSocket
 func buildVMessProxy(link Urls, config OutputConfig) (Proxy, error) {
-	// ... (前面的解析和初始化保持不变)
+	vmess, err := DecodeVMESSURL(link.Url)
+	if err != nil {
+		return Proxy{}, err
+	}
+	if vmess.Ps == "" {
+		vmess.Ps = fmt.Sprintf("%s:%s", vmess.Add, utils.GetPortString(vmess.Port))
+	}
+
+	tls := vmess.Tls != "none" && vmess.Tls != ""
+	port, _ := convertToInt(vmess.Port)
+	aid, _ := convertToInt(vmess.Aid)
 
 	proxy := Proxy{
 		Name:             vmess.Ps,
@@ -225,10 +237,15 @@ func buildVMessProxy(link Urls, config OutputConfig) (Proxy, error) {
 		proxy.Network = vmess.Net
 	}
 
-	// ... (后面的处理 Sni 逻辑保持不变)
+
+
+	// 处理 Sni (保持原逻辑)
+	if vmess.Sni != "" {
+		proxy.Sni = vmess.Sni
+	}
+
 	return proxy, nil
 }
-
 // buildVMessSurgeLine 将 VMess 链接转换为 Surge 节点行。
 // Surge 导出只保留当前实现支持的传输层和 TLS 字段，其余能力不会在此处完整保真。
 func buildVMessSurgeLine(link string, config OutputConfig) (string, string, error) {
