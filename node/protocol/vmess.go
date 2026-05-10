@@ -168,6 +168,7 @@ func ConvertProxyToVmess(proxy Proxy) Vmess {
 }
 
 // buildVMessProxy 将 VMess 链接转换为 Clash Proxy，并应用输出阶段的 UDP、证书校验和前置代理覆盖项。
+// buildVMessProxy 将 VMess 链接转换为 Clash Proxy，并应用输出阶段的 UDP、证书校验和前置代理覆盖项。
 func buildVMessProxy(link Urls, config OutputConfig) (Proxy, error) {
 	vmess, err := DecodeVMESSURL(link.Url)
 	if err != nil {
@@ -176,12 +177,57 @@ func buildVMessProxy(link Urls, config OutputConfig) (Proxy, error) {
 	if vmess.Ps == "" {
 		vmess.Ps = fmt.Sprintf("%s:%s", vmess.Add, utils.GetPortString(vmess.Port))
 	}
-	wsOpts := map[string]interface{}{"path": vmess.Path, "headers": map[string]interface{}{"Host": vmess.Host}}
-	DeleteOpts(wsOpts)
+
 	tls := vmess.Tls != "none" && vmess.Tls != ""
 	port, _ := convertToInt(vmess.Port)
 	aid, _ := convertToInt(vmess.Aid)
-	return Proxy{Name: vmess.Ps, Type: "vmess", Server: vmess.Add, Port: FlexPort(port), Cipher: vmess.Scy, Uuid: vmess.Id, AlterId: strconv.Itoa(aid), Network: vmess.Net, Tls: tls, Ws_opts: wsOpts, Udp: config.Udp, Skip_cert_verify: config.Cert, Dialer_proxy: link.DialerProxyName}, nil
+
+	// 新建一个 Proxy 对象
+	proxy := Proxy{
+		Name:             vmess.Ps,
+		Type:             "vmess",
+		Server:           vmess.Add,
+		Port:             FlexPort(port),
+		Cipher:           vmess.Scy,
+		Uuid:             vmess.Id,
+		AlterId:          strconv.Itoa(aid),
+		Network:          vmess.Net,
+		Tls:              tls,
+		Udp:              config.Udp,
+		Skip_cert_verify: config.Cert,
+		Dialer_proxy:     link.DialerProxyName,
+	}
+
+	// 核心修复逻辑：根据协议动态分配 opts
+	if vmess.Net == "tcp" && vmess.Type == "http" {
+		// 修复 TCP + HTTP 伪装的情况
+		// Clash 的 http-opts 要求 path 是字符串数组，headers 中的值也是数组
+		host := vmess.Host
+		if host == "" {
+			host = vmess.Add // 如果为空，容错回退为 IP
+		}
+		path := vmess.Path
+		if path == "" {
+			path = "/" // 容错处理
+		}
+		
+		httpOpts := map[string]interface{}{
+			"method": "GET",
+			"path":   []string{path},
+			"headers": map[string]interface{}{
+				"Host": []string{host},
+			},
+		}
+		proxy.Http_opts = httpOpts // 注意：这需要在你的 Proxy 结构体中存在 Http_opts 字段
+
+	} else {
+		// 默认处理为 ws_opts (保留原作者逻辑)
+		wsOpts := map[string]interface{}{"path": vmess.Path, "headers": map[string]interface{}{"Host": vmess.Host}}
+		DeleteOpts(wsOpts)
+		proxy.Ws_opts = wsOpts
+	}
+
+	return proxy, nil
 }
 
 // buildVMessSurgeLine 将 VMess 链接转换为 Surge 节点行。
