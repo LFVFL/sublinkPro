@@ -70,6 +70,16 @@ func GetMihomoAdapter(nodeLink string) (constant.Proxy, error) {
 		return nil, fmt.Errorf("unmarshal proxy map error: %v", err)
 	}
 
+// ==========================================
+	// 【核心修复：强行修正内部传给 Mihomo 的配置字典】
+	// 如果存在 http-opts 且底层协议标注为 vmess，必须确保 Mihomo 能正确识别它
+	if proxyMap["type"] == "vmess" {
+		if _, ok := proxyMap["http-opts"]; ok {
+			// 强行把 network 字段设为 http
+			proxyMap["network"] = "http"
+		}
+	}
+	// ==========================================
 	// 3. Create Mihomo Proxy Adapter
 	proxyAdapter, err := adapter.ParseProxy(proxyMap)
 	if err != nil {
